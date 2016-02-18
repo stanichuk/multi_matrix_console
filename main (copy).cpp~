@@ -1,0 +1,455 @@
+
+// MPI.cpp : Defines the entry point for the console application.
+//
+#include <stdio.h>
+#include <stdlib.h>
+#include <iostream>
+#include <mpi/mpi.h>
+using namespace std;
+int ProcNum = 6;
+int ProcRank;
+double* pProcRows;
+const int N1 = 80;
+const int N2 = 1040;
+const int N3 = 100;
+int pRowsA[] = {13,13,13,13,14,14};
+int pColsB[] = {16,16,17,17,17,17};
+int	pSendNumSubA[] = {13*1040,13*1040,13*1040,13*1040,14*1040,14*1040};
+int	pSendIndSubA[] = {0,13*1040,2*13*1040,3*13*1040,4*13*1040,4*13*1040+14*1040};
+int	pSendNumSubB[] = {1040*16,1040*16,1040*17,1040*17,1040*17,1040*17};
+int	pSendIndSubB[] = {0,1040*16,2*1040*16,2*1040*16+1040*17,2*1040*16+2*1040*17,2*1040*16+1040*17};
+int	pSendNumSubC[] = {N1*N3/8,N1*N3/8,N1*N3/8,N1*N3/8,N1*N3/8,N1*N3/8,N1*N3/8,N1*N3/8};
+const int	pResInd[] = {0,16,32,49,66,83};
+
+ const int ProcNumber = 6;
+
+ void ReadMemory(double* pMatrixA,double* pMatrixB){
+
+    FILE *Ptr;
+    int temp;
+    Ptr=fopen("mass.txt","r");
+    for(int i=0;i<N1*N2;i++)
+    {
+        fscanf(Ptr,"%d",&temp);
+        pMatrixA[i] = (double)temp;
+    }
+
+     for(int i=0;i<N2*N3;i++)
+     {
+        fscanf(Ptr,"%d",&temp);
+        pMatrixB[i] = (double)temp;
+     }
+     fclose(Ptr);
+ }
+
+ void Calc (double * pMatrixA, double * pMatrixB, double * pMatrixB1, double * pProcResult, double * pResult1, int iIndex);
+
+int main(int argc, char* argv[])
+{
+  double* pMatrixA;  // Перший аргумент - початкова матриця
+  double* pMatrixB;  // Другий аргумент - початковий вектор
+  double* pResult;  // Результат множення матриці на вектор
+//  double* pProcRows;
+  double* pProcResult;
+  double* pResult1=new double[N1*N3];
+  int *pSendNum = new int[ProcNumber];
+  int *pSendInd = new int[ProcNumber];
+  int RowNum;
+
+    pProcRows = new double[N1*N2*6];
+    pMatrixA = new double[N1*N2];
+    pMatrixB = new double[N2*N3];
+    pResult =  new double[N1*N3];
+    pProcResult = new double[(N1/8)*N3];
+    double* pMatrixB1 = new double[N2*N3*6];
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &ProcNum);
+    MPI_Comm_rank(MPI_COMM_WORLD, &ProcRank);
+
+        for(int i=0; i<N2*N3; i++){
+            pMatrixB[i]=0;
+        }
+
+
+    if(ProcRank==0){
+//Заповнення матриць
+        ReadMemory(pMatrixA, pMatrixB);
+    }
+//---------------------------------------------------------
+int iIndex = 0;
+Calc (pMatrixA, pMatrixB, pMatrixB1, pProcResult, pResult1, iIndex);
+//-----------------------------------------------------------
+
+    MPI_Finalize();
+  return 0;
+}
+
+void Calc( double * pMatrixA, double * pMatrixB, double * pMatrixB1, double * pProcResult, double * pResult, int iIndex)
+{
+    //Data Distribution
+    MPI_Status status;
+    if(ProcRank==0){
+        MPI_Send(pMatrixA,pSendNumSubA[5]+pSendNumSubA[4]+pSendNumSubA[3]+pSendNumSubA[2]+pSendNumSubA[1],MPI_DOUBLE,5,0,MPI_COMM_WORLD);
+        MPI_Send(pMatrixB,pSendNumSubB[5]+pSendNumSubB[4]+pSendNumSubB[3]+pSendNumSubB[2]+pSendNumSubB[1],MPI_DOUBLE,5,2,MPI_COMM_WORLD);
+        for(int i=0;i<pSendNumSubA[0];i++)
+            pProcRows[i] = pMatrixA[i];
+        for(int i=0;i<pSendNumSubB[0];i++)
+            pMatrixB1[i] = pMatrixB[i];
+    }
+    if(ProcRank==5){
+        MPI_Recv(pProcRows,pSendNumSubA[5]+pSendNumSubA[4]+pSendNumSubA[3]+pSendNumSubA[2]+pSendNumSubA[1],MPI_DOUBLE,0,0,MPI_COMM_WORLD,&status);
+        MPI_Recv(pMatrixB1,pSendNumSubB[5]+pSendNumSubB[4]+pSendNumSubB[3]+pSendNumSubB[2]+pSendNumSubB[1],MPI_DOUBLE,0,2,MPI_COMM_WORLD,&status);
+        MPI_Send(pProcRows+pSendNumSubA[5],pSendNumSubA[4]+pSendNumSubA[3]+pSendNumSubA[2]+pSendNumSubA[1],MPI_DOUBLE,4,0,MPI_COMM_WORLD);
+        MPI_Send(pMatrixB1+pSendNumSubB[5],pSendNumSubB[4]+pSendNumSubB[3]+pSendNumSubB[2]+pSendNumSubB[1],MPI_DOUBLE,4,2,MPI_COMM_WORLD);
+    }
+    if(ProcRank==4){
+        MPI_Recv(pProcRows,pSendNumSubA[4]+pSendNumSubA[3]+pSendNumSubA[2]+pSendNumSubA[1],MPI_DOUBLE,5,0,MPI_COMM_WORLD,&status);
+        MPI_Recv(pMatrixB1,pSendNumSubA[4]+pSendNumSubA[3]+pSendNumSubA[2]+pSendNumSubA[1],MPI_DOUBLE,5,2,MPI_COMM_WORLD,&status);
+        MPI_Send(pProcRows+pSendNumSubA[4],pSendNumSubA[3]+pSendNumSubA[2]+pSendNumSubA[1],MPI_DOUBLE,3,0,MPI_COMM_WORLD);
+        MPI_Send(pMatrixB1+pSendNumSubB[4],pSendNumSubB[3]+pSendNumSubB[2]+pSendNumSubB[1],MPI_DOUBLE,3,2,MPI_COMM_WORLD);
+    }
+    if(ProcRank==3){
+        MPI_Recv(pProcRows,pSendNumSubA[3]+pSendNumSubA[2]+pSendNumSubA[1],MPI_DOUBLE,4,0,MPI_COMM_WORLD,&status);
+        MPI_Recv(pMatrixB1,pSendNumSubA[3]+pSendNumSubA[2]+pSendNumSubA[1],MPI_DOUBLE,4,2,MPI_COMM_WORLD,&status);
+
+        MPI_Send(pProcRows+pSendNumSubA[3],pSendNumSubA[2]+pSendNumSubA[1],MPI_DOUBLE,2,0,MPI_COMM_WORLD);
+        MPI_Send(pMatrixB1+pSendNumSubB[3],pSendNumSubB[2]+pSendNumSubB[1],MPI_DOUBLE,2,2,MPI_COMM_WORLD);
+    }
+    if(ProcRank==2){
+        MPI_Recv(pProcRows,pSendNumSubA[2]+pSendNumSubA[1],MPI_DOUBLE,3,0,MPI_COMM_WORLD,&status);
+        MPI_Recv(pMatrixB1,pSendNumSubA[2]+pSendNumSubA[1],MPI_DOUBLE,3,2,MPI_COMM_WORLD,&status);
+
+        MPI_Send(pProcRows+pSendNumSubA[2],pSendNumSubA[1],MPI_DOUBLE,1,0,MPI_COMM_WORLD);
+        MPI_Send(pMatrixB1+pSendNumSubB[2],pSendNumSubB[1],MPI_DOUBLE,1,2,MPI_COMM_WORLD);
+    }
+    if(ProcRank==1){
+        MPI_Recv(pProcRows,pSendNumSubA[1],MPI_DOUBLE,2,0,MPI_COMM_WORLD,&status);
+        MPI_Recv(pMatrixB1,pSendNumSubA[1],MPI_DOUBLE,2,2,MPI_COMM_WORLD,&status);
+    }
+    cout << "P" << ProcRank << endl;
+    for(int i=0;i<pSendNumSubA[ProcRank];i++)
+    {
+        cout << pProcRows[i] << " ";
+    }
+    cout << endl;
+    //обнулення проміжних результатів
+    for(int i=0; i<N1/8; i++)
+        for(int j=0; j<N3+1; j++)
+            pProcResult[i*N3+j]=0;
+    //множення і обмін підматрицями В
+    if (ProcRank==0){
+
+    for(int i=0; i<pRowsA[0]; i++)
+        for(int j=0; j<pColsB[0]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[0]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[0],MPI_DOUBLE,5,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[1],MPI_DOUBLE,1,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[0]; i++)
+        for(int j=0; j<pColsB[1]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[1]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[1],MPI_DOUBLE,5,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[2],MPI_DOUBLE,1,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[0]; i++)
+        for(int j=0; j<pColsB[2]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[2]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[2],MPI_DOUBLE,5,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[3],MPI_DOUBLE,1,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[0]; i++)
+        for(int j=0; j<pColsB[3]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[3]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[3],MPI_DOUBLE,5,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[4],MPI_DOUBLE,1,0,MPI_COMM_WORLD,&status);
+
+    for(int i=0; i<pRowsA[0]; i++)
+        for(int j=0; j<pColsB[4]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[4]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[4],MPI_DOUBLE,5,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[5],MPI_DOUBLE,1,0,MPI_COMM_WORLD,&status);
+
+    for(int i=0; i<pRowsA[0]; i++)
+        for(int j=0; j<pColsB[5]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[5]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    }
+    if(ProcRank==5){
+        for(int i=0; i<pRowsA[5]; i++)
+        for(int j=0; j<pColsB[5]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[5]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[5],MPI_DOUBLE,4,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[0],MPI_DOUBLE,0,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[5]; i++)
+        for(int j=0; j<pColsB[0]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[0]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[0],MPI_DOUBLE,4,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[1],MPI_DOUBLE,0,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[5]; i++)
+        for(int j=0; j<pColsB[1]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[1]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[1],MPI_DOUBLE,4,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[2],MPI_DOUBLE,0,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[5]; i++)
+        for(int j=0; j<pColsB[2]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[2]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[2],MPI_DOUBLE,4,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[3],MPI_DOUBLE,0,0,MPI_COMM_WORLD,&status);
+
+    for(int i=0; i<pRowsA[5]; i++)
+        for(int j=0; j<pColsB[3]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[3]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[3],MPI_DOUBLE,4,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[4],MPI_DOUBLE,0,0,MPI_COMM_WORLD,&status);
+
+    for(int i=0; i<pRowsA[5]; i++)
+        for(int j=0; j<pColsB[4]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[4]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    }
+
+    if(ProcRank==3){
+                for(int i=0; i<pRowsA[3]; i++)
+        for(int j=0; j<pColsB[3]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[3]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[3],MPI_DOUBLE,2,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[4],MPI_DOUBLE,4,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[3]; i++)
+        for(int j=0; j<pColsB[4]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[4]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[4],MPI_DOUBLE,2,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[5],MPI_DOUBLE,4,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[3]; i++)
+        for(int j=0; j<pColsB[5]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[5]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[5],MPI_DOUBLE,2,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[0],MPI_DOUBLE,4,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[3]; i++)
+        for(int j=0; j<pColsB[0]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[0]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[0],MPI_DOUBLE,2,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[1],MPI_DOUBLE,4,0,MPI_COMM_WORLD,&status);
+
+    for(int i=0; i<pRowsA[3]; i++)
+        for(int j=0; j<pColsB[1]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[1]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[1],MPI_DOUBLE,2,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[2],MPI_DOUBLE,4,0,MPI_COMM_WORLD,&status);
+
+    for(int i=0; i<pRowsA[3]; i++)
+        for(int j=0; j<pColsB[2]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[2]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    }
+    if(ProcRank==2){
+                for(int i=0; i<pRowsA[2]; i++)
+        for(int j=0; j<pColsB[2]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[2]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[2],MPI_DOUBLE,1,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[3],MPI_DOUBLE,3,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[2]; i++)
+        for(int j=0; j<pColsB[3]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[3]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[3],MPI_DOUBLE,1,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[4],MPI_DOUBLE,3,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[2]; i++)
+        for(int j=0; j<pColsB[4]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[4]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[4],MPI_DOUBLE,1,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[5],MPI_DOUBLE,3,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[2]; i++)
+        for(int j=0; j<pColsB[5]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[5]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[5],MPI_DOUBLE,1,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[0],MPI_DOUBLE,3,0,MPI_COMM_WORLD,&status);
+
+    for(int i=0; i<pRowsA[2]; i++)
+        for(int j=0; j<pColsB[0]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[0]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[0],MPI_DOUBLE,1,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[1],MPI_DOUBLE,3,0,MPI_COMM_WORLD,&status);
+
+    for(int i=0; i<pRowsA[2]; i++)
+        for(int j=0; j<pColsB[1]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[1]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    }
+    if(ProcRank==4){
+            for(int i=0; i<pRowsA[4]; i++)
+        for(int j=0; j<pColsB[4]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[4]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[4],MPI_DOUBLE,3,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[5],MPI_DOUBLE,5,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[4]; i++)
+        for(int j=0; j<pColsB[5]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[5]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[5],MPI_DOUBLE,3,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[0],MPI_DOUBLE,5,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[4]; i++)
+        for(int j=0; j<pColsB[0]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[0]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[0],MPI_DOUBLE,3,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[1],MPI_DOUBLE,5,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[4]; i++)
+        for(int j=0; j<pColsB[1]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[1]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[1],MPI_DOUBLE,3,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[2],MPI_DOUBLE,5,0,MPI_COMM_WORLD,&status);
+
+    for(int i=0; i<pRowsA[4]; i++)
+        for(int j=0; j<pColsB[2]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[2]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[2],MPI_DOUBLE,3,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[3],MPI_DOUBLE,5,0,MPI_COMM_WORLD,&status);
+
+    for(int i=0; i<pRowsA[4]; i++)
+        for(int j=0; j<pColsB[3]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[3]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    }
+
+    if(ProcRank==1){
+        for(int i=0; i<pRowsA[1]; i++)
+        for(int j=0; j<pColsB[1]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[1]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[1],MPI_DOUBLE,0,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[2],MPI_DOUBLE,2,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[1]; i++)
+        for(int j=0; j<pColsB[2]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[2]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[2],MPI_DOUBLE,0,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[3],MPI_DOUBLE,2,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[0]; i++)
+        for(int j=0; j<pColsB[3]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[3]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[3],MPI_DOUBLE,0,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[4],MPI_DOUBLE,2,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0; i<pRowsA[1]; i++)
+        for(int j=0; j<pColsB[4]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[4]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[4],MPI_DOUBLE,0,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[5],MPI_DOUBLE,2,0,MPI_COMM_WORLD,&status);
+
+    for(int i=0; i<pRowsA[1]; i++)
+        for(int j=0; j<pColsB[5]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[5]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    MPI_Send(pMatrixB1,pSendNumSubB[5],MPI_DOUBLE,0,0,MPI_COMM_WORLD);
+    MPI_Recv(pMatrixB1,pSendNumSubB[0],MPI_DOUBLE,2,0,MPI_COMM_WORLD,&status);
+
+    for(int i=0; i<pRowsA[1]; i++)
+        for(int j=0; j<pColsB[0]; j++)
+            for(int k=0; k<N2; k++)
+                pProcResult[i*N3+j+pResInd[0]]+=pProcRows[i*N2+k]*pMatrixB1[j*N2+k];
+    }
+//Data Collection
+    if(ProcRank==5){
+        MPI_Send(pProcResult,pSendNumSubC[5],MPI_DOUBLE,4,0,MPI_COMM_WORLD);
+    }
+
+    if(ProcRank==4){
+        MPI_Send(pProcResult,pSendNumSubC[4],MPI_DOUBLE,3,0,MPI_COMM_WORLD);
+        MPI_Recv(pProcResult,pSendNumSubC[5],MPI_DOUBLE,5,0,MPI_COMM_WORLD,&status);
+        MPI_Send(pProcResult,pSendNumSubC[5],MPI_DOUBLE,3,0,MPI_COMM_WORLD);
+    }
+
+    if(ProcRank==3){
+        MPI_Send(pProcResult,pSendNumSubC[3],MPI_DOUBLE,2,0,MPI_COMM_WORLD);
+        MPI_Recv(pProcResult,pSendNumSubC[4],MPI_DOUBLE,4,0,MPI_COMM_WORLD,&status);
+        MPI_Send(pProcResult,pSendNumSubC[4],MPI_DOUBLE,2,0,MPI_COMM_WORLD);
+        MPI_Recv(pProcResult,pSendNumSubC[5],MPI_DOUBLE,4,0,MPI_COMM_WORLD,&status);
+        MPI_Send(pProcResult,pSendNumSubC[5],MPI_DOUBLE,2,0,MPI_COMM_WORLD);
+    }
+    if(ProcRank==2){
+        MPI_Send(pProcResult,pSendNumSubC[2],MPI_DOUBLE,1,0,MPI_COMM_WORLD);
+        MPI_Recv(pProcResult,pSendNumSubC[3],MPI_DOUBLE,3,0,MPI_COMM_WORLD,&status);
+        MPI_Send(pProcResult,pSendNumSubC[3],MPI_DOUBLE,1,0,MPI_COMM_WORLD);
+        MPI_Recv(pProcResult,pSendNumSubC[4],MPI_DOUBLE,3,0,MPI_COMM_WORLD,&status);
+        MPI_Send(pProcResult,pSendNumSubC[4],MPI_DOUBLE,1,0,MPI_COMM_WORLD);
+        MPI_Recv(pProcResult,pSendNumSubC[5],MPI_DOUBLE,3,0,MPI_COMM_WORLD,&status);
+        MPI_Send(pProcResult,pSendNumSubC[5],MPI_DOUBLE,1,0,MPI_COMM_WORLD);
+    }
+
+    if(ProcRank==1){
+        MPI_Send(pProcResult,pSendNumSubC[1],MPI_DOUBLE,0,0,MPI_COMM_WORLD);
+        MPI_Recv(pProcResult,pSendNumSubC[2],MPI_DOUBLE,2,0,MPI_COMM_WORLD,&status);
+        MPI_Send(pProcResult,pSendNumSubC[2],MPI_DOUBLE,0,0,MPI_COMM_WORLD);
+        MPI_Recv(pProcResult,pSendNumSubC[3],MPI_DOUBLE,2,0,MPI_COMM_WORLD,&status);
+        MPI_Send(pProcResult,pSendNumSubC[3],MPI_DOUBLE,0,0,MPI_COMM_WORLD);
+        MPI_Recv(pProcResult,pSendNumSubC[4],MPI_DOUBLE,2,0,MPI_COMM_WORLD,&status);
+        MPI_Send(pProcResult,pSendNumSubC[4],MPI_DOUBLE,0,0,MPI_COMM_WORLD);
+        MPI_Recv(pProcResult,pSendNumSubC[5],MPI_DOUBLE,2,0,MPI_COMM_WORLD,&status);
+        MPI_Send(pProcResult,pSendNumSubC[5],MPI_DOUBLE,0,0,MPI_COMM_WORLD);
+    }
+    if(ProcRank==0){
+
+        MPI_Recv(pResult+pSendNumSubC[0],pSendNumSubC[1],MPI_DOUBLE,1,0,MPI_COMM_WORLD,&status);
+        MPI_Recv(pResult+pSendNumSubC[0]+pSendNumSubC[1],pSendNumSubC[2],MPI_DOUBLE,1,0,MPI_COMM_WORLD,&status);
+        MPI_Recv(pResult+pSendNumSubC[0]+pSendNumSubC[1]+pSendNumSubC[2],pSendNumSubC[3],MPI_DOUBLE,1,0,MPI_COMM_WORLD,&status);
+        MPI_Recv(pResult+pSendNumSubC[0]+pSendNumSubC[1]+pSendNumSubC[2]+pSendNumSubC[3],pSendNumSubC[4],MPI_DOUBLE,1,0,MPI_COMM_WORLD,&status);
+        MPI_Recv(pResult+pSendNumSubC[0]+pSendNumSubC[1]+pSendNumSubC[2]+pSendNumSubC[3]+pSendNumSubC[4],pSendNumSubC[5],MPI_DOUBLE,1,0,MPI_COMM_WORLD,&status);
+
+        for(int i=0;i<pSendNumSubC[6];i++){
+            pResult[i]=pProcResult[i];
+        }
+
+        FILE *Ptr;
+        int temp;
+        Ptr=fopen("Result.txt","w");
+        for(int i=0; i<N1*N3; i++){
+            temp = (int)pResult[i];
+            fprintf(Ptr,"%d ",temp);
+            if((i+1)%N3==0){
+                fprintf(Ptr,"\n");
+            }
+        }
+        fclose(Ptr);
+        cout << "Calculation over." << endl;
+    }
+}
+
